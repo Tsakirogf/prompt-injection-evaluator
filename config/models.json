@@ -1,0 +1,22 @@
+{
+  "models": [
+    {
+      "name": "distilgpt2",
+      "description": "Ultra-light, fastest model for testing",
+      "requires_auth": false,
+      "torch_dtype": "float16"
+    },
+    {
+      "name": "gpt2",
+      "description": "Slightly bigger, very stable model",
+      "requires_auth": false,
+      "torch_dtype": "float16"
+    },
+    {
+      "name": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+      "description": "Small chat-style model",
+      "requires_auth": false,
+      "torch_dtype": "float16"
+    }
+  ]
+}
