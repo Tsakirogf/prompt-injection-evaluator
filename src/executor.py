@@ -3,8 +3,10 @@ Executor Module
 
 Contains the main execution logic for the Prompt Injection Evaluator.
 """
+from datetime import datetime
 from model_factory import ModelFactory
 from test_suite_loader import TestSuiteLoader
+from report_generator import ReportGenerator
 
 
 def run_evaluator():
@@ -64,6 +66,46 @@ def run_evaluator():
     print(f"  Categories: {', '.join(f'{k}({v})' for k, v in categories.items())}")
     print(f"  Severities: {', '.join(f'{k}({v})' for k, v in severities.items())}")
     
+    # Generate reports for each model
+    print("\n📝 Generating Reports:")
+    print("-" * 70)
+    
+    report_generator = ReportGenerator()
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    for model in model_factory:
+        model_name = model['name']
+        print(f"  Generating reports for: {model_name}")
+        
+        # Create sample test results (placeholder - will be replaced with actual evaluation)
+        test_results = []
+        for test_case in test_suite:
+            test_results.append({
+                'test_id': test_case.id,
+                'test_name': test_case.name,
+                'category': test_case.category,
+                'severity': test_case.severity,
+                'passed': False,  # Placeholder - will be determined by actual evaluation
+                'output': 'Sample output (evaluation not yet implemented)',
+                'notes': f'Expected behavior: {test_case.expected_behavior}'
+            })
+        
+        # Metadata for the report
+        metadata = {
+            'Model': model_name,
+            'Date': timestamp,
+            'Test Suite': test_suite.name,
+            'Version': test_suite.version,
+            'Total Tests': len(test_results)
+        }
+        
+        # Generate both PDF and Excel reports
+        reports = report_generator.generate_reports(model_name, test_results, metadata)
+        
+        print(f"    ✓ PDF:   {reports['pdf']}")
+        print(f"    ✓ Excel: {reports['excel']}")
+    
     print("\n" + "=" * 70)
-    print("✅ Setup complete! Ready to evaluate prompt injections.")
+    print("✅ Setup complete! Reports generated successfully.")
+    print(f"📂 Reports saved in: {report_generator.output_dir.absolute()}")
     print("=" * 70)
