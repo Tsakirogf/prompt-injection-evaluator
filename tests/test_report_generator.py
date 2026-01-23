@@ -58,6 +58,21 @@ def sample_metadata():
     }
 
 
+@pytest.fixture
+def sample_stats():
+    """Sample statistics for reports."""
+    return {
+        'stats_by_category': {
+            'system_override': {'passed': 1, 'failed': 0, 'total': 1},
+            'secret_extraction': {'passed': 0, 'failed': 1, 'total': 1}
+        },
+        'stats_by_severity': {
+            'high': {'passed': 1, 'failed': 0, 'total': 1},
+            'critical': {'passed': 0, 'failed': 1, 'total': 1}
+        }
+    }
+
+
 def test_report_generator_initialization(temp_report_dir):
     """Test that ReportGenerator initializes correctly."""
     generator = ReportGenerator(temp_report_dir)
@@ -75,14 +90,16 @@ def test_sanitize_filename():
     assert generator.sanitize_filename("model@#$%name") == "modelname"
 
 
-def test_generate_pdf_report(temp_report_dir, sample_test_results, sample_metadata):
+def test_generate_pdf_report(temp_report_dir, sample_test_results, sample_metadata, sample_stats):
     """Test PDF report generation."""
     generator = ReportGenerator(temp_report_dir)
     
     pdf_path = generator.generate_pdf_report(
         "test-model",
         sample_test_results,
-        sample_metadata
+        sample_metadata,
+        sample_stats['stats_by_category'],
+        sample_stats['stats_by_severity']
     )
     
     assert pdf_path.exists()
@@ -91,14 +108,16 @@ def test_generate_pdf_report(temp_report_dir, sample_test_results, sample_metada
     assert pdf_path.stat().st_size > 0
 
 
-def test_generate_excel_report(temp_report_dir, sample_test_results, sample_metadata):
+def test_generate_excel_report(temp_report_dir, sample_test_results, sample_metadata, sample_stats):
     """Test Excel report generation."""
     generator = ReportGenerator(temp_report_dir)
     
     excel_path = generator.generate_excel_report(
         "test-model",
         sample_test_results,
-        sample_metadata
+        sample_metadata,
+        sample_stats['stats_by_category'],
+        sample_stats['stats_by_severity']
     )
     
     assert excel_path.exists()
@@ -107,14 +126,16 @@ def test_generate_excel_report(temp_report_dir, sample_test_results, sample_meta
     assert excel_path.stat().st_size > 0
 
 
-def test_generate_reports(temp_report_dir, sample_test_results, sample_metadata):
+def test_generate_reports(temp_report_dir, sample_test_results, sample_metadata, sample_stats):
     """Test generating both PDF and Excel reports."""
     generator = ReportGenerator(temp_report_dir)
     
     reports = generator.generate_reports(
         "test-model",
         sample_test_results,
-        sample_metadata
+        sample_metadata,
+        sample_stats['stats_by_category'],
+        sample_stats['stats_by_severity']
     )
     
     assert 'pdf' in reports
@@ -176,3 +197,64 @@ def test_multiple_reports_same_directory(temp_report_dir, sample_test_results):
     assert reports2['pdf'].exists()
     assert reports1['pdf'] != reports2['pdf']
     assert reports1['excel'] != reports2['excel']
+
+
+def test_generate_comparison_report(temp_report_dir, sample_test_results):
+    """Test generating comparison report for multiple models."""
+    from test_suite_loader import TestSuiteLoader
+    
+    generator = ReportGenerator(temp_report_dir)
+    
+    # Create mock model results
+    all_model_results = [
+        {
+            'model_name': 'model-1',
+            'model_description': 'First test model',
+            'test_results': sample_test_results,
+            'stats_by_category': {
+                'system_override': {'passed': 1, 'failed': 0, 'total': 1},
+                'secret_extraction': {'passed': 0, 'failed': 1, 'total': 1}
+            },
+            'stats_by_severity': {
+                'high': {'passed': 1, 'failed': 0, 'total': 1},
+                'critical': {'passed': 0, 'failed': 1, 'total': 1}
+            },
+            'total_tests': 2,
+            'passed_tests': 1,
+            'failed_tests': 1,
+            'pass_rate': 50.0
+        },
+        {
+            'model_name': 'model-2',
+            'model_description': 'Second test model',
+            'test_results': sample_test_results,
+            'stats_by_category': {
+                'system_override': {'passed': 1, 'failed': 0, 'total': 1},
+                'secret_extraction': {'passed': 1, 'failed': 0, 'total': 1}
+            },
+            'stats_by_severity': {
+                'high': {'passed': 1, 'failed': 0, 'total': 1},
+                'critical': {'passed': 1, 'failed': 0, 'total': 1}
+            },
+            'total_tests': 2,
+            'passed_tests': 2,
+            'failed_tests': 0,
+            'pass_rate': 100.0
+        }
+    ]
+    
+    # Load test suite
+    test_suite = TestSuiteLoader().load()
+    
+    comparison_reports = generator.generate_comparison_report(
+        all_model_results,
+        test_suite,
+        '2026-01-14 10:00:00'
+    )
+    
+    assert 'pdf' in comparison_reports
+    assert 'excel' in comparison_reports
+    assert comparison_reports['pdf'].exists()
+    assert comparison_reports['excel'].exists()
+    assert comparison_reports['pdf'].name == 'model_comparison.pdf'
+    assert comparison_reports['excel'].name == 'model_comparison.xlsx'
