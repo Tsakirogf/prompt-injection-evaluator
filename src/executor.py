@@ -137,14 +137,14 @@ def evaluate_model(model: Dict[str, Any], test_suite: TestSuite, use_llm_judge: 
     }
 
 
-def run_evaluator():
+def run_all_models():
     """
-    Execute the prompt injection evaluation workflow.
+    Execute the prompt injection evaluation workflow for ALL models.
     
-    This function orchestrates the entire evaluation process,
-    keeping the main entry point clean.
+    Runs all models defined in models.json configuration file.
+    This function orchestrates the entire evaluation process.
     """
-    print("🔒 Prompt Injection Evaluator")
+    print("🔒 Prompt Injection Evaluator - Running All Models")
     print("=" * 70)
     
     # Load models
@@ -261,3 +261,128 @@ def run_evaluator():
     for model_result in all_model_results:
         print(f"  {model_result['model_name']:40} {model_result['passed_tests']:3}/{model_result['total_tests']:3} passed ({model_result['pass_rate']:5.1f}%)")
     print("=" * 70)
+
+
+def run_single_model(model_name: str, test_suite_path: str = None):
+    """
+    Execute evaluation for a single model specified via command line.
+    
+    Args:
+        model_name: Name of the model to evaluate (must exist in models.json)
+        test_suite_path: Optional path to a custom test suite JSON file
+    """
+    print(f"🔒 Prompt Injection Evaluator - Single Model Mode")
+    print("=" * 70)
+    print(f"  Model: {model_name}")
+    if test_suite_path:
+        print(f"  Test Suite: {test_suite_path}")
+    print("=" * 70)
+    
+    # Load models and find the requested model
+    model_factory = ModelFactory()
+    target_model = None
+    
+    for model in model_factory:
+        if model['name'] == model_name:
+            target_model = model
+            break
+    
+    if not target_model:
+        print(f"\n❌ Error: Model '{model_name}' not found in models.json")
+        print("\nAvailable models:")
+        for model in model_factory:
+            print(f"  - {model['name']}")
+        return 1
+    
+    print(f"\n✓ Found model: {target_model['name']}")
+    print(f"  Description: {target_model['description']}")
+    
+    # Load test cases
+    test_loader = TestSuiteLoader(test_suite_path) if test_suite_path else TestSuiteLoader()
+    test_suite = test_loader.load()
+    print(f"\n✓ Loaded {len(test_suite)} test cases from suite: {test_suite.name}")
+    print(f"  Version: {test_suite.version}")
+    print(f"  Description: {test_suite.description}")
+    
+    # Display test cases summary
+    print(f"\n🧪 Test Cases:")
+    print("-" * 70)
+    for test_case in test_suite:
+        severity_emoji = {
+            'critical': '🔴',
+            'high': '🟠',
+            'medium': '🟡',
+            'low': '🟢'
+        }.get(test_case.severity, '⚪')
+        
+        print(f"  {severity_emoji} [{test_case.id}] {test_case.name}")
+        print(f"     Category: {test_case.category} | Severity: {test_case.severity}")
+    
+    # Run evaluation
+    print("\n🚀 Starting Evaluation:")
+    print("=" * 70)
+    
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    model_result = evaluate_model(target_model, test_suite)
+    
+    # Generate reports
+    print("\n📝 Generating Reports:")
+    print("-" * 70)
+    
+    report_generator = ReportGenerator()
+    
+    # Metadata for the report
+    metadata = {
+        'Model': model_result['model_name'],
+        'Description': model_result['model_description'],
+        'Date': timestamp,
+        'Test Suite': test_suite.name,
+        'Version': test_suite.version,
+        'Total Tests': model_result['total_tests'],
+        'Passed': model_result['passed_tests'],
+        'Failed': model_result['failed_tests'],
+        'Pass Rate': f"{model_result['pass_rate']:.1f}%"
+    }
+    
+    # Generate both PDF and Excel reports
+    reports = report_generator.generate_reports(
+        model_result['model_name'], 
+        model_result['test_results'], 
+        metadata,
+        stats_by_category=model_result['stats_by_category'],
+        stats_by_severity=model_result['stats_by_severity']
+    )
+    
+    print(f"  ✓ PDF:   {reports['pdf']}")
+    print(f"  ✓ Excel: {reports['excel']}")
+    
+    print("\n" + "=" * 70)
+    print("✅ Evaluation complete! Reports generated successfully.")
+    print(f"📂 Reports saved in: {report_generator.output_dir.absolute()}")
+    print("\n📈 Performance Summary:")
+    print("-" * 70)
+    print(f"  Model: {model_result['model_name']}")
+    print(f"  Passed: {model_result['passed_tests']}/{model_result['total_tests']} ({model_result['pass_rate']:.1f}%)")
+    print(f"  Failed: {model_result['failed_tests']}/{model_result['total_tests']}")
+    print("=" * 70)
+    
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    
+    # Parse command line arguments
+    if len(sys.argv) < 2:
+        print("Usage: python executor.py <model_name> [test_suite_path]")
+        print("\nExample:")
+        print("  python executor.py gpt2")
+        print("  python executor.py gpt2 config/test_cases.json")
+        print("\nTo run all models, use: python main.py")
+        sys.exit(1)
+    
+    model_name = sys.argv[1]
+    test_suite_path = sys.argv[2] if len(sys.argv) > 2 else None
+    
+    exit_code = run_single_model(model_name, test_suite_path)
+    sys.exit(exit_code)
