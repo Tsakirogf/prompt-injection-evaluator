@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
+import warnings
 
 
 @dataclass
@@ -88,10 +89,26 @@ class TestSuiteLoader:
                         If None, uses default config/test_cases.json
         """
         if config_path is None:
-            # Default to config/test_cases.json in project root
+            # If a directory of per-category prompt case files exists, load them all and merge.
             project_root = Path(__file__).parent.parent
-            config_path = project_root / "config" / "test_cases.json"
-        
+            dir_path = project_root / "config" / "prompt_cases"
+            primary = project_root / "config" / "prompt_injection_cases.json"
+            fallback = project_root / "config" / "test_cases.json"
+
+            if dir_path.exists() and dir_path.is_dir():
+                config_path = dir_path
+            elif primary.exists():
+                config_path = primary
+            elif fallback.exists():
+                warnings.warn(
+                    "Default test cases filename 'config/test_cases.json' is deprecated; found and loading it as a fallback. Please rename to 'config/prompt_injection_cases.json' or create 'config/prompt_cases/' directory.",
+                    DeprecationWarning
+                )
+                config_path = fallback
+            else:
+                # Prefer directory path by default
+                config_path = dir_path
+
         self.config_path = Path(config_path)
         self._test_suite: Optional[TestSuite] = None
     
@@ -111,42 +128,79 @@ class TestSuiteLoader:
                 f"Test cases configuration file not found: {self.config_path}"
             )
         
-        with open(self.config_path, 'r') as f:
-            data = json.load(f)
-        
-        # Parse test suite metadata
-        suite_info = data.get('test_suite', {})
-        test_suite = TestSuite(
-            name=suite_info.get('name', 'Unnamed Test Suite'),
-            version=suite_info.get('version', '1.0'),
-            description=suite_info.get('description', '')
-        )
-        
-        # Parse test cases
-        test_cases_data = data.get('test_cases', [])
-        if not test_cases_data:
-            raise ValueError(
-                f"No test cases found in configuration: {self.config_path}"
+        if self.config_path.is_dir():
+            # Merge all JSON files in directory
+            merged_suite = TestSuite(name='Merged Prompt Cases', version='1.0', description='Merged per-category prompt cases')
+            files = sorted([p for p in self.config_path.iterdir() if p.suffix.lower() == '.json'])
+            if not files:
+                raise ValueError(f"No JSON files found in directory: {self.config_path}")
+
+            for p in files:
+                with open(p, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                # Merge metadata (concatenate names/descriptions)
+                suite_info = data.get('test_suite', {})
+                merged_suite.name = merged_suite.name + ' / ' + suite_info.get('name', '')
+                merged_suite.description = (merged_suite.description + ' ' + suite_info.get('description', '')).strip()
+
+                test_cases_data = data.get('test_cases', [])
+                for tc_data in test_cases_data:
+                    test_case = TestCase(
+                        id=tc_data['id'],
+                        name=tc_data['name'],
+                        category=tc_data['category'],
+                        description=tc_data['description'],
+                        system_prompt=tc_data.get('system_prompt', ''),
+                        user_prompt=tc_data.get('user_prompt', ''),
+                        expected_behavior=tc_data.get('expected_behavior', ''),
+                        severity=tc_data.get('severity', 'low'),
+                        user_prompt_template=tc_data.get('user_prompt_template'),
+                        page_content=tc_data.get('page_content'),
+                        protected_secret=tc_data.get('protected_secret'),
+                        expected_keywords_absent=tc_data.get('expected_keywords_absent', []),
+                        expected_keywords_present=tc_data.get('expected_keywords_present', [])
+                    )
+                    merged_suite.test_cases.append(test_case)
+
+            self._test_suite = merged_suite
+            return merged_suite
+        else:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # Parse test suite metadata
+            suite_info = data.get('test_suite', {})
+            test_suite = TestSuite(
+                name=suite_info.get('name', 'Unnamed Test Suite'),
+                version=suite_info.get('version', '1.0'),
+                description=suite_info.get('description', '')
             )
-        
-        for tc_data in test_cases_data:
-            test_case = TestCase(
-                id=tc_data['id'],
-                name=tc_data['name'],
-                category=tc_data['category'],
-                description=tc_data['description'],
-                system_prompt=tc_data['system_prompt'],
-                user_prompt=tc_data.get('user_prompt', ''),
-                expected_behavior=tc_data['expected_behavior'],
-                severity=tc_data['severity'],
-                user_prompt_template=tc_data.get('user_prompt_template'),
-                page_content=tc_data.get('page_content'),
-                protected_secret=tc_data.get('protected_secret'),
-                expected_keywords_absent=tc_data.get('expected_keywords_absent', []),
-                expected_keywords_present=tc_data.get('expected_keywords_present', [])
-            )
-            test_suite.test_cases.append(test_case)
-        
+
+            # Parse test cases
+            test_cases_data = data.get('test_cases', [])
+            if not test_cases_data:
+                raise ValueError(
+                    f"No test cases found in configuration: {self.config_path}"
+                )
+
+            for tc_data in test_cases_data:
+                test_case = TestCase(
+                    id=tc_data['id'],
+                    name=tc_data['name'],
+                    category=tc_data['category'],
+                    description=tc_data['description'],
+                    system_prompt=tc_data['system_prompt'],
+                    user_prompt=tc_data.get('user_prompt', ''),
+                    expected_behavior=tc_data['expected_behavior'],
+                    severity=tc_data['severity'],
+                    user_prompt_template=tc_data.get('user_prompt_template'),
+                    page_content=tc_data.get('page_content'),
+                    protected_secret=tc_data.get('protected_secret'),
+                    expected_keywords_absent=tc_data.get('expected_keywords_absent', []),
+                    expected_keywords_present=tc_data.get('expected_keywords_present', [])
+                )
+                test_suite.test_cases.append(test_case)
+
         self._test_suite = test_suite
         return test_suite
     

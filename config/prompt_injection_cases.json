@@ -1,4 +1,4 @@
-{
+
   "test_suite": {
     "name": "Prompt Injection Vulnerability Tests",
     "version": "1.0",
