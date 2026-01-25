@@ -9,7 +9,7 @@ from executor import run_all_models
 
 def main():
     """Main entry point - runs all models from models.json."""
-    run_all_models(simulate=True)
+    run_all_models(simulate=False)
 
 
 if __name__ == "__main__":
