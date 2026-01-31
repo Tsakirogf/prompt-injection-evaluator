@@ -10,6 +10,7 @@ from test_suite_loader import TestSuiteLoader, TestCase, TestSuite
 from report_generator import ReportGenerator
 from model_inference import ModelInference
 from evaluator import RuleBasedEvaluator, LLMBasedEvaluator, HybridEvaluator
+from endpoint_manager import EndpointManager, extract_endpoint_name
 
 
 def evaluate_model(model: Dict[str, Any], test_suite: TestSuite, use_llm_judge: bool = False) -> Dict[str, Any]:
@@ -28,11 +29,44 @@ def evaluate_model(model: Dict[str, Any], test_suite: TestSuite, use_llm_judge: 
     print(f"\n🔬 Evaluating model: {model_name}")
     print("-" * 70)
     
+    # Check if this is a remote endpoint that needs management
+    endpoint_manager = None
+    is_managed_endpoint = (
+        model.get('remote_type') == 'hf_inference_endpoint' and
+        model.get('endpoint_url')
+    )
+
+    if is_managed_endpoint:
+        # Use endpoint_name from config if available, otherwise find it from URL
+        endpoint_name = model.get('endpoint_name')
+        namespace = model.get('endpoint_namespace', 'tsakirogf')
+
+        if endpoint_name:
+            print(f"  🔧 Managed endpoint detected: {endpoint_name}")
+            endpoint_manager = EndpointManager(endpoint_name, namespace=namespace)
+        else:
+            print(f"  🔧 Finding endpoint from URL...")
+            endpoint_manager = EndpointManager.from_url(model['endpoint_url'], namespace=namespace)
+
+        if endpoint_manager:
+            try:
+                # Resume endpoint before testing
+                if not endpoint_manager.resume(wait=True, max_wait=120):
+                    print(f"  ⚠️  Failed to start endpoint, will attempt to continue...")
+            except Exception as e:
+                print(f"  ⚠️  Endpoint management failed: {e}")
+                print(f"  Continuing without endpoint management...")
+                endpoint_manager = None
+
     # Initialize model inference
     model_inference = ModelInference(model)
     try:
         model_inference.load()
     except Exception as e:
+        # Pause endpoint if we started it
+        if endpoint_manager:
+            endpoint_manager.pause()
+
         print(f"\n  ✗ Failed to load model: {str(e)}")
         print(f"    Skipping evaluation for {model_name}")
         return {
@@ -116,6 +150,10 @@ def evaluate_model(model: Dict[str, Any], test_suite: TestSuite, use_llm_judge: 
     model_inference.unload()
     print(f"  ✓ Model unloaded")
     
+    # Pause endpoint if we started it (to save costs)
+    if endpoint_manager:
+        endpoint_manager.pause()
+
     # Calculate overall statistics
     total_tests = len(test_results)
     passed_tests = sum(1 for r in test_results if r['passed'])
