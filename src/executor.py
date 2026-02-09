@@ -2,26 +2,84 @@
 Executor Module
 
 Contains the main execution logic for the Prompt Injection Evaluator.
+
+This module supports two modes:
+1. Traditional mode: Collect and evaluate in one pass
+2. Separated mode: Use ResponseCollector for collection, then evaluate
+
+For the separated workflow, see:
+- response_collector.py for collection phase
+- response_evaluator.py for evaluation phase
 """
 from datetime import datetime
-from typing import List, Dict, Any
+from pathlib import Path
+from typing import List, Dict, Any, Optional
 from model_factory import ModelFactory
 from test_suite_loader import TestSuiteLoader, TestCase, TestSuite
 from report_generator import ReportGenerator
 from model_inference import ModelInference
-from evaluator import RuleBasedEvaluator, LLMBasedEvaluator, HybridEvaluator
+from multi_tier_evaluator import MultiTierEvaluator
 from endpoint_manager import EndpointManager, extract_endpoint_name
+from response_collector import ResponseCollector, CollectedResponse, CollectionMetadata
 
 
-def evaluate_model(model: Dict[str, Any], test_suite: TestSuite, use_llm_judge: bool = False) -> Dict[str, Any]:
+def _create_collection_metadata(
+    model: Dict[str, Any],
+    test_suite: TestSuite
+) -> CollectionMetadata:
+    """Create CollectionMetadata from model and test suite."""
+    return CollectionMetadata(
+        model_name=model['name'],
+        endpoint_url=model.get('endpoint_url'),
+        test_suite_name=test_suite.name,
+        test_suite_version=test_suite.version,
+        started_at=datetime.now().isoformat(),
+        completed_at=datetime.now().isoformat(),
+        total_tests=len(test_suite)
+    )
+
+
+def _convert_results_to_responses(
+    test_results: List[Dict[str, Any]],
+    test_suite: TestSuite
+) -> List[CollectedResponse]:
+    """Convert test results to CollectedResponse objects for saving."""
+    responses = []
+    for result in test_results:
+        test_case = test_suite.get_by_id(result['test_id'])
+        response = CollectedResponse(
+            test_id=result['test_id'],
+            test_name=result['test_name'],
+            category=result['category'],
+            severity=result['severity'],
+            system_prompt=result.get('system_prompt', ''),
+            user_prompt=result.get('user_prompt', ''),
+            model_response=result.get('output', ''),
+            response_timestamp=datetime.now().isoformat(),
+            response_time_ms=None,
+            error=None if not result.get('output', '').startswith('[ERROR]') else result.get('output'),
+            expected_behavior=result.get('expected_behavior', ''),
+            protected_secret=test_case.protected_secret if test_case else None,
+            expected_keywords_absent=test_case.expected_keywords_absent if test_case else [],
+            expected_keywords_present=test_case.expected_keywords_present if test_case else []
+        )
+        responses.append(response)
+    return responses
+
+
+def evaluate_model(
+    model: Dict[str, Any],
+    test_suite: TestSuite,
+    save_responses: Optional[Path] = None
+) -> Dict[str, Any]:
     """
     Evaluate a single model against all test cases.
-    
+
     Args:
         model: Model configuration dictionary
         test_suite: TestSuite containing all test cases
-        use_llm_judge: Whether to use LLM-based evaluation (default: False, uses rule-based)
-    
+        save_responses: Optional path to save collected responses to xlsx file
+
     Returns:
         Dictionary containing evaluation results for the model
     """
@@ -83,12 +141,8 @@ def evaluate_model(model: Dict[str, Any], test_suite: TestSuite, use_llm_judge: 
         }
     
     # Initialize evaluator
-    if use_llm_judge:
-        evaluator = LLMBasedEvaluator()
-        print(f"    Using LLM-based evaluation")
-    else:
-        evaluator = RuleBasedEvaluator()
-        print(f"    Using rule-based evaluation")
+    evaluator = MultiTierEvaluator()
+    print(f"    Using multi-tier evaluation")
     
     test_results = []
     stats_by_category = {}
@@ -105,8 +159,9 @@ def evaluate_model(model: Dict[str, Any], test_suite: TestSuite, use_llm_judge: 
             )
             
             # Evaluate the output
-            passed = evaluator.evaluate(test_case, output)
-            
+            eval_result = evaluator.evaluate(test_case, output)
+            passed = eval_result.passed
+
         except Exception as e:
             output = f"[ERROR] {str(e)}"
             passed = False
@@ -149,10 +204,18 @@ def evaluate_model(model: Dict[str, Any], test_suite: TestSuite, use_llm_judge: 
     # Unload model to free memory
     model_inference.unload()
     print(f"  ✓ Model unloaded")
-    
+
     # Pause endpoint if we started it (to save costs)
     if endpoint_manager:
         endpoint_manager.pause()
+
+    # Optionally save responses for later re-evaluation
+    if save_responses:
+        collector = ResponseCollector(model)
+        collector.metadata = _create_collection_metadata(model, test_suite)
+        collector.responses = _convert_results_to_responses(test_results, test_suite)
+        saved_path = collector.save_to_xlsx(save_responses)
+        print(f"  ✓ Responses saved to: {saved_path}")
 
     # Calculate overall statistics
     total_tests = len(test_results)

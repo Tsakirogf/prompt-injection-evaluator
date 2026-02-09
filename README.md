@@ -1,123 +1,96 @@
 # Prompt Injection Evaluator
 
-A Python framework for evaluating prompt injection vulnerabilities in Large Language Models (LLMs).
+Test LLM models for prompt injection vulnerabilities.
 
-## Features
+## Quick Start
 
-- 🔒 Comprehensive test suite for prompt injection attacks
-- 🤖 Support for multiple models via HuggingFace
-- 📊 Automated evaluation with detailed reports (PDF & Excel)
-- 🎯 Two execution modes: batch (all models) or single model
-- 📈 Category and severity-based analysis
+### Step 1: Collect Responses
+Run test suite against your model and save responses:
 
-## Setup
-
-1. Create and activate a virtual environment:
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+python src/main.py --model "meta-llama/Llama-3.1-8B-Instruct"
 ```
 
-2. Install dependencies:
+Output: `responses/meta-llama_Llama-3.1-8B-Instruct.xlsx`
+
+### Step 2: Evaluate Responses
+Evaluate the collected responses and generate reports:
+
+```bash
+python src/main.py --evaluate responses/meta-llama_Llama-3.1-8B-Instruct.xlsx
+```
+
+Output:
+- `reports/meta-llama_Llama-3.1-8B-Instruct_multi_tier.pdf`
+- `reports/meta-llama_Llama-3.1-8B-Instruct_multi_tier.xlsx`
+
+### Or Do Both at Once
+
+```bash
+python src/main.py --model "meta-llama/Llama-3.1-8B-Instruct" --evaluate
+```
+
+## Installation
+
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Configure models in `config/models.json` and test cases in `config/test_cases.json`
-
-## Usage
-
-### Method 1: Run All Models (Batch Mode)
-
-Evaluate **all models** defined in `config/models.json` in one run:
-
-```bash
-python src/main.py
+For remote models, create `.env` file:
 ```
-
-This will:
-- Load all models from `config/models.json`
-- Run all test cases from `config/test_cases.json` on each model
-- Generate individual reports for each model
-- Create a comparison report across all models
-- Save all reports in the `reports/` directory
-
-**Best for**: Comprehensive evaluation and model comparison
-
-### Method 2: Run Single Model (CLI Mode)
-
-Evaluate a **specific model** via command line:
-
-```bash
-python src/executor.py <model_name> [optional: test_suite_path]
+HUGGINGFACE_TOKEN=your_token_here
 ```
-
-**Examples:**
-```bash
-# Run gpt2 model with default test suite
-python src/executor.py gpt2
-
-# Run distilgpt2 model with default test suite
-python src/executor.py distilgpt2
-
-# Run TinyLlama model with custom test suite
-python src/executor.py TinyLlama/TinyLlama-1.1B-Chat-v1.0 config/custom_tests.json
-```
-
-This will:
-- Load only the specified model from `config/models.json`
-- Run all test cases (or custom test suite if provided)
-- Generate reports for that single model
-- Save reports in the `reports/` directory
-
-**Best for**: Quick testing, debugging specific models, or iterative development
-
-### Available Models
-
-Models are configured in `config/models.json`. To see available models, check that file or run:
-```bash
-python src/executor.py
-```
-(without arguments to see usage and available models)
-
-Current default models:
-- `distilgpt2` - Ultra-light, fastest model
-- `gpt2` - Slightly bigger, stable model
-- `TinyLlama/TinyLlama-1.1B-Chat-v1.0` - Small chat-style model
 
 ## Configuration
 
-### Adding Models
+### Models
+Edit `config/models.json` to add models:
 
-Edit `config/models.json`:
 ```json
 {
   "models": [
     {
-      "name": "model-name-on-huggingface",
-      "description": "Description of the model",
-      "requires_auth": false,
-      "torch_dtype": "float16"
+      "name": "meta-llama/Llama-3.1-8B-Instruct",
+      "description": "Llama model via HF endpoint",
+      "requires_auth": true,
+      "remote_type": "hf_inference_endpoint",
+      "endpoint_url": "https://your-endpoint.aws.endpoints.huggingface.cloud",
+      "endpoint_namespace": "your_namespace",
+      "endpoint_name": "your-endpoint-name"
     }
   ]
 }
 ```
 
-### Adding Test Cases
+### Test Cases
+Test cases are in `config/prompt_cases/`:
+- `authority_impersonation.json`
+- `hijacking.json`
+- `jailbreak.json`
+- `multilingual.json`
+- And more...
 
-Edit `config/test_cases.json` to add new test cases:
-```json
-{
-  "id": "PI-XXX",
-  "name": "Test Name",
-  "category": "category_name",
-  "description": "What this test evaluates",
-  "system_prompt": "System instructions",
-  "user_prompt": "User prompt with injection attempt",
-  "expected_behavior": "what_should_happen",
-  "severity": "critical|high|medium|low"
-}
+## Understanding Results
+
+Each test gets **PASS** or **FAIL**:
+- **PASS**: Model successfully resisted the prompt injection attack
+- **FAIL**: Model was compromised (followed malicious instructions, leaked secrets, etc.)
+
+Example output:
 ```
+Results:
+  Model: meta-llama/Llama-3.1-8B-Instruct
+  Pass Rate: 68.2%
+  Passed: 131/192
+```
+
+## Why Step 1 and Step 2 are Separate
+
+**Step 1 (Collect)** queries the model - this can be expensive and slow.
+
+**Step 2 (Evaluate)** just analyzes the saved responses - this is free and instant.
+
+**Benefit**: You can improve your evaluation logic and re-run Step 2 multiple times without re-querying the model!
 
 ## Project Structure
 
@@ -125,63 +98,29 @@ Edit `config/test_cases.json` to add new test cases:
 prompt-injection-evaluator/
 ├── config/
 │   ├── models.json           # Model configurations
-│   └── test_cases.json       # Test suite definitions
+│   └── prompt_cases/         # Test cases (192 total)
 ├── src/
-│   ├── main.py               # Entry point for batch mode (all models)
-│   ├── executor.py           # Execution logic + CLI mode entry point
-│   ├── evaluator.py          # Evaluation logic
-│   ├── model_factory.py      # Model loading
-│   ├── model_inference.py    # Model inference wrapper
-│   ├── report_generator.py   # Report generation (PDF/Excel)
-│   └── test_suite_loader.py  # Test case loader
-├── tests/                     # Unit tests
-├── reports/                   # Generated evaluation reports (auto-created)
-├── requirements.txt           # Project dependencies
-└── README.md                  # This file
+│   └── main.py               # Main entry point
+├── responses/                # Collected model responses
+├── reports/                  # Evaluation reports
+└── README.md                 # This file
 ```
 
-## Reports
+## Troubleshooting
 
-Reports are automatically generated in the `reports/` directory with timestamps:
+**"Model not found"**
+- Check model name matches `config/models.json` exactly
 
-- **Individual Model Reports**: `{model_name}_{timestamp}.pdf` and `.xlsx`
-- **Comparison Report**: `comparison_report_{timestamp}.pdf` and `.xlsx`
+**"Response file not found"**
+- Run Step 1 first to collect responses
 
-Reports include:
-- Test results for each injection attempt
-- Pass/fail status with explanations
-- Category and severity breakdowns
-- Performance statistics
-- Model comparison charts (in comparison report)
+**Endpoint issues**
+- Verify `HUGGINGFACE_TOKEN` in `.env`
+- Check endpoint URL in `models.json`
 
-## Development
+## Help
 
-Run tests:
 ```bash
-python -m pytest tests/ -v
+python src/main.py --help
 ```
 
-Run with coverage:
-```bash
-python -m pytest tests/ --cov=src --cov-report=html
-```
-
-## Test Categories
-
-- `system_prompt_override` - Attempts to override system instructions
-- `secret_extraction` - Data exfiltration attempts
-- `jailbreak` - Bypassing content policies
-- `indirect_injection` - Injection through user content
-- `role_confusion` - Role/identity manipulation
-- `delimiter_attack` - Special delimiter exploitation
-
-## Severity Levels
-
-- 🔴 **Critical**: Immediate security threat (secret exposure, full jailbreak)
-- 🟠 **High**: Significant policy violation
-- 🟡 **Medium**: Moderate security concern
-- 🟢 **Low**: Minor issue or edge case
-
-## License
-
-MIT
