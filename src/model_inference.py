@@ -77,7 +77,7 @@ class ModelInference:
             else:
                 self.auth_header = None
 
-            print(f"    ✓ Remote endpoint configured: {self.endpoint_url}")
+            print(f"    [OK] Remote endpoint configured: {self.endpoint_url}")
             return
 
         # Handle local models
@@ -114,8 +114,8 @@ class ModelInference:
             return_full_text=False
         )
         
-        print(f"    ✓ Model loaded successfully")
-    
+        print(f"    [OK] Model loaded successfully")
+
     def _get_hf_token(self) -> str:
         """
         Get Hugging Face token from multiple sources.
@@ -266,9 +266,13 @@ class ModelInference:
                 # Parse OpenAI-format response
                 result = response.json()
                 if "choices" in result and len(result["choices"]) > 0:
-                    return result["choices"][0]["message"]["content"].strip()
+                    content = result["choices"][0]["message"]["content"]
+                    if content is not None:
+                        return content.strip()
+                    else:
+                        return "[ERROR] Empty response from endpoint (content is null)"
 
-                return str(result).strip()
+                return str(result).strip() if result else "[ERROR] Empty response"
 
             except requests.exceptions.Timeout:
                 if attempt < max_retries - 1:
@@ -344,13 +348,15 @@ class ModelInference:
                 # Handle different response formats
                 if isinstance(result, list) and len(result) > 0:
                     if isinstance(result[0], dict) and "generated_text" in result[0]:
-                        return result[0]["generated_text"].strip()
+                        text = result[0]["generated_text"]
+                        return text.strip() if text is not None else "[ERROR] Empty response from endpoint"
                     elif isinstance(result[0], str):
-                        return result[0].strip()
+                        return result[0].strip() if result[0] is not None else "[ERROR] Empty response from endpoint"
                 elif isinstance(result, dict) and "generated_text" in result:
-                    return result["generated_text"].strip()
+                    text = result["generated_text"]
+                    return text.strip() if text is not None else "[ERROR] Empty response from endpoint"
 
-                return str(result).strip()
+                return str(result).strip() if result else "[ERROR] Empty response"
 
             except requests.exceptions.Timeout:
                 if attempt < max_retries - 1:

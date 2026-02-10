@@ -58,10 +58,10 @@ class EndpointManager:
         for endpoint in endpoints:
             if endpoint.get('url') == endpoint_url:
                 endpoint_name = endpoint.get('name')
-                print(f"  ✓ Found endpoint name: {endpoint_name}")
+                print(f"  [OK] Found endpoint name: {endpoint_name}")
                 return cls(endpoint_name, namespace)
 
-        print(f"  ⚠️  Could not find endpoint matching URL: {endpoint_url}")
+        print(f"  [WARNING] Could not find endpoint matching URL: {endpoint_url}")
         return None
 
     def _get_token(self) -> str:
@@ -86,7 +86,7 @@ class EndpointManager:
             result = response.json()
             return result if isinstance(result, list) else result.get('items', [])
         except Exception as e:
-            print(f"⚠️  Failed to list endpoints: {e}")
+            print(f"[WARNING] Failed to list endpoints: {e}")
             return []
 
     def _get_status(self) -> Optional[dict]:
@@ -99,7 +99,7 @@ class EndpointManager:
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            print(f"⚠️  Failed to get endpoint status: {e}")
+            print(f"[WARNING] Failed to get endpoint status: {e}")
             return None
 
     def is_running(self) -> bool:
@@ -123,37 +123,37 @@ class EndpointManager:
             True if successful, False otherwise
         """
         if self.is_running():
-            print(f"  ✓ Endpoint already running")
+            print(f"  [OK] Endpoint already running")
             return True
 
-        print(f"  ▶ Resuming endpoint: {self.endpoint_name}...")
+        print(f"  [>] Resuming endpoint: {self.endpoint_name}...")
         url = f"{self.api_base}/{self.namespace}/{self.endpoint_name}/resume"
         headers = {"Authorization": f"Bearer {self.token}"}
 
         try:
             response = requests.post(url, headers=headers, timeout=10)
             response.raise_for_status()
-            print(f"  ✓ Resume request sent")
+            print(f"  [OK] Resume request sent")
 
             if not wait:
                 return True
 
             # Wait for endpoint to be running
-            print(f"  ⏳ Waiting for endpoint to start (max {max_wait}s)...")
+            print(f"  [WAIT] Waiting for endpoint to start (max {max_wait}s)...")
             start_time = time.time()
 
             while time.time() - start_time < max_wait:
                 if self.is_running():
                     elapsed = int(time.time() - start_time)
-                    print(f"  ✓ Endpoint running (took {elapsed}s)")
+                    print(f"  [OK] Endpoint running (took {elapsed}s)")
                     return True
                 time.sleep(5)
 
-            print(f"  ⚠️  Timeout waiting for endpoint to start")
+            print(f"  [WARNING] Timeout waiting for endpoint to start")
             return False
 
         except Exception as e:
-            print(f"  ✗ Failed to resume endpoint: {e}")
+            print(f"  [ERROR] Failed to resume endpoint: {e}")
             return False
 
     def pause(self) -> bool:
@@ -164,21 +164,21 @@ class EndpointManager:
             True if successful, False otherwise
         """
         if not self.is_running():
-            print(f"  ✓ Endpoint already paused")
+            print(f"  [OK] Endpoint already paused")
             return True
 
-        print(f"  ⏸ Pausing endpoint: {self.endpoint_name}...")
+        print(f"  [PAUSE] Pausing endpoint: {self.endpoint_name}...")
         url = f"{self.api_base}/{self.namespace}/{self.endpoint_name}/pause"
         headers = {"Authorization": f"Bearer {self.token}"}
 
         try:
             response = requests.post(url, headers=headers, timeout=10)
             response.raise_for_status()
-            print(f"  ✓ Endpoint paused (billing stopped)")
+            print(f"  [OK] Endpoint paused (billing stopped)")
             return True
 
         except Exception as e:
-            print(f"  ✗ Failed to pause endpoint: {e}")
+            print(f"  [ERROR] Failed to pause endpoint: {e}")
             return False
 
 

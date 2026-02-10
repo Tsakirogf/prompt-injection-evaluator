@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 from response_collector import CollectedResponse, CollectionMetadata, ResponseCollector
-from test_suite_loader import TestCase
+from test_suite_loader import TestCase, TestSuiteLoader, TestSuite
 from multi_tier_evaluator import MultiTierEvaluator, EvaluationResult, SecurityLevel
 from report_generator import ReportGenerator
 
@@ -30,17 +30,28 @@ class ResponseEvaluator:
     - COMPROMISED (0): Model follows malicious instructions or leaks secrets
     """
 
-    def __init__(self, xlsx_path: Path):
+    def __init__(self, xlsx_path: Path, test_suite_path: Optional[Path] = None):
         """
         Initialize the ResponseEvaluator.
 
         Args:
             xlsx_path: Path to xlsx file with collected responses
+            test_suite_path: Optional path to test suite config. If None, uses default.
         """
         self.xlsx_path = Path(xlsx_path)
 
-        # Load responses
+        # Load responses from xlsx (source of truth for model responses)
         self.metadata, self.responses = ResponseCollector.load_from_xlsx(self.xlsx_path)
+
+        # Load fresh test definitions from JSON config
+        # This ensures we always use the latest test case criteria
+        loader = TestSuiteLoader(str(test_suite_path) if test_suite_path else None)
+        self.test_suite: TestSuite = loader.load()
+
+        # Build lookup dict for fast test case retrieval
+        self._test_case_lookup: Dict[str, TestCase] = {
+            tc.id: tc for tc in self.test_suite.test_cases
+        }
 
         # Initialize evaluator
         self.evaluator = MultiTierEvaluator()
@@ -50,29 +61,55 @@ class ResponseEvaluator:
         self.stats_by_category: Dict[str, Dict[str, int]] = {}
         self.stats_by_severity: Dict[str, Dict[str, int]] = {}
 
-    def _response_to_test_case(self, response: CollectedResponse) -> TestCase:
+    def _get_test_case_for_response(self, response: CollectedResponse) -> TestCase:
         """
-        Reconstruct a TestCase from a CollectedResponse for evaluation.
+        Get a TestCase for evaluation, using fresh definitions from JSON config.
+
+        Uses the latest test case definitions (expected_keywords_absent, etc.)
+        from the JSON config files, while keeping the response's prompts for context.
 
         Args:
-            response: CollectedResponse to convert
+            response: CollectedResponse to get test case for
 
         Returns:
-            TestCase object suitable for evaluation
+            TestCase object with fresh evaluation criteria
         """
-        return TestCase(
-            id=response.test_id,
-            name=response.test_name,
-            category=response.category,
-            description=f"Reconstructed from response collection",
-            system_prompt=response.system_prompt,
-            user_prompt=response.user_prompt,
-            expected_behavior=response.expected_behavior,
-            severity=response.severity,
-            protected_secret=response.protected_secret,
-            expected_keywords_absent=response.expected_keywords_absent,
-            expected_keywords_present=response.expected_keywords_present
-        )
+        # Try to get fresh test case from loaded config
+        fresh_test_case = self._test_case_lookup.get(response.test_id)
+
+        if fresh_test_case:
+            # Use fresh test case definitions for evaluation criteria
+            # Keep response's prompts in case they were customized during collection
+            return TestCase(
+                id=fresh_test_case.id,
+                name=fresh_test_case.name,
+                category=fresh_test_case.category,
+                description=fresh_test_case.description,
+                system_prompt=response.system_prompt,  # From response (actual prompt used)
+                user_prompt=response.user_prompt,      # From response (actual prompt used)
+                expected_behavior=fresh_test_case.expected_behavior,
+                severity=fresh_test_case.severity,
+                protected_secret=fresh_test_case.protected_secret,
+                # Use FRESH definitions from JSON config
+                expected_keywords_absent=fresh_test_case.expected_keywords_absent,
+                expected_keywords_present=fresh_test_case.expected_keywords_present
+            )
+        else:
+            # Fallback: test case not found in config, use response data
+            # This handles cases where test cases were removed from config
+            return TestCase(
+                id=response.test_id,
+                name=response.test_name,
+                category=response.category,
+                description=f"Reconstructed from response (test case not found in config)",
+                system_prompt=response.system_prompt,
+                user_prompt=response.user_prompt,
+                expected_behavior=response.expected_behavior,
+                severity=response.severity,
+                protected_secret=response.protected_secret,
+                expected_keywords_absent=response.expected_keywords_absent,
+                expected_keywords_present=response.expected_keywords_present
+            )
 
     def evaluate_all(self, verbose: bool = True) -> List[Dict[str, Any]]:
         """
@@ -88,6 +125,7 @@ class ResponseEvaluator:
             print(f"\nEvaluating responses...")
             print(f"  Model: {self.metadata.model_name}")
             print(f"  Total responses: {len(self.responses)}")
+            print(f"  Test definitions: {len(self._test_case_lookup)} loaded from config (fresh)")
             print("-" * 70)
 
         self.evaluation_results = []
@@ -104,8 +142,8 @@ class ResponseEvaluator:
                     print(" (skipped - collection error)")
                 continue
 
-            # Reconstruct TestCase for evaluation
-            test_case = self._response_to_test_case(response)
+            # Get TestCase with fresh definitions from JSON config
+            test_case = self._get_test_case_for_response(response)
 
             # Evaluate with multi-tier evaluator
             eval_result: EvaluationResult = self.evaluator.evaluate(

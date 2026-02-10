@@ -34,6 +34,15 @@
       "endpoint_name": "llama-3-1-8b-instruct-hgr"
     },
     {
+      "name": "meta-llama/Meta-Llama-3-70B-Instruct",
+      "description": "Llama 3 70B Instruct via dedicated Inference Endpoint",
+      "requires_auth": true,
+      "remote_type": "hf_inference_endpoint",
+      "endpoint_url": "https://phec52az2aqigu5w.us-east-1.aws.endpoints.huggingface.cloud",
+      "endpoint_namespace": "tsakirogf",
+      "endpoint_name": "meta-llama-3-70b-instruct-ylv"
+    },
+    {
         "name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
         "description": "Deepseek R1 Distill Qwen 7B via HF Inference Endpoint",
         "requires_auth": true,
