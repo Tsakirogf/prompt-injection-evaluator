@@ -32,6 +32,26 @@
       "endpoint_url": "https://wacdy6ihswnfwbk1.us-east-1.aws.endpoints.huggingface.cloud",
       "endpoint_namespace": "tsakirogf",
       "endpoint_name": "llama-3-1-8b-instruct-hgr"
+    },
+    {
+        "name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+        "description": "Deepseek R1 Distill Qwen 7B via HF Inference Endpoint",
+        "requires_auth": true,
+        "remote_type": "hf_inference_endpoint",
+        "endpoint_url": "https://r5pubipn4o5c4wbl.us-east-1.aws.endpoints.huggingface.cloud",
+        "endpoint_namespace": "tsakirogf",
+        "endpoint_name": "deepseek-r1-distill-qwen-7b-jqx"
+    },
+    {
+        "name": "gpt-oss-20b-exj",
+        "description": "gpt-oss-20b via HF Inference Endpoint (openai/gpt-oss-20b)",
+        "requires_auth": true,
+        "remote_type": "hf_inference_endpoint",
+        "endpoint_url": "https://l4z7juf0hlq3uapt.us-east-2.aws.endpoints.huggingface.cloud",
+        "endpoint_namespace": "tsakirogf",
+        "endpoint_name": "gpt-oss-20b-exj",
+        "model_name": "openai/gpt-oss-20b",
+        "torch_dtype": "float16"
     }
   ]
 }

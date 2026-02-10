@@ -3,23 +3,18 @@ Executor Module
 
 Contains the main execution logic for the Prompt Injection Evaluator.
 
-This module supports two modes:
-1. Traditional mode: Collect and evaluate in one pass
-2. Separated mode: Use ResponseCollector for collection, then evaluate
+Uses the separated workflow:
+- Step 1: ResponseCollector collects model responses
+- Step 2: ResponseEvaluator evaluates the collected responses
 
-For the separated workflow, see:
-- response_collector.py for collection phase
-- response_evaluator.py for evaluation phase
+This separation allows re-evaluation without re-querying expensive models.
 """
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from model_factory import ModelFactory
-from test_suite_loader import TestSuiteLoader, TestCase, TestSuite
+from test_suite_loader import TestSuiteLoader, TestSuite
 from report_generator import ReportGenerator
-from model_inference import ModelInference
-from multi_tier_evaluator import MultiTierEvaluator
-from endpoint_manager import EndpointManager, extract_endpoint_name
 from response_collector import ResponseCollector, CollectedResponse, CollectionMetadata
 
 
@@ -73,7 +68,10 @@ def evaluate_model(
     save_responses: Optional[Path] = None
 ) -> Dict[str, Any]:
     """
-    Evaluate a single model against all test cases.
+    Evaluate a single model against all test cases using the separated workflow.
+
+    Step 1: Collect responses (expensive)
+    Step 2: Evaluate responses (cheap)
 
     Args:
         model: Model configuration dictionary
@@ -84,49 +82,17 @@ def evaluate_model(
         Dictionary containing evaluation results for the model
     """
     model_name = model['name']
-    print(f"\n🔬 Evaluating model: {model_name}")
+    print(f"\nEvaluating model: {model_name}")
     print("-" * 70)
     
-    # Check if this is a remote endpoint that needs management
-    endpoint_manager = None
-    is_managed_endpoint = (
-        model.get('remote_type') == 'hf_inference_endpoint' and
-        model.get('endpoint_url')
-    )
+    # STEP 1: COLLECT RESPONSES
+    print("STEP 1: Collecting responses from model...")
 
-    if is_managed_endpoint:
-        # Use endpoint_name from config if available, otherwise find it from URL
-        endpoint_name = model.get('endpoint_name')
-        namespace = model.get('endpoint_namespace', 'tsakirogf')
-
-        if endpoint_name:
-            print(f"  🔧 Managed endpoint detected: {endpoint_name}")
-            endpoint_manager = EndpointManager(endpoint_name, namespace=namespace)
-        else:
-            print(f"  🔧 Finding endpoint from URL...")
-            endpoint_manager = EndpointManager.from_url(model['endpoint_url'], namespace=namespace)
-
-        if endpoint_manager:
-            try:
-                # Resume endpoint before testing
-                if not endpoint_manager.resume(wait=True, max_wait=120):
-                    print(f"  ⚠️  Failed to start endpoint, will attempt to continue...")
-            except Exception as e:
-                print(f"  ⚠️  Endpoint management failed: {e}")
-                print(f"  Continuing without endpoint management...")
-                endpoint_manager = None
-
-    # Initialize model inference
-    model_inference = ModelInference(model)
+    collector = ResponseCollector(model)
     try:
-        model_inference.load()
+        responses = collector.collect_all(test_suite, verbose=True)
     except Exception as e:
-        # Pause endpoint if we started it
-        if endpoint_manager:
-            endpoint_manager.pause()
-
-        print(f"\n  ✗ Failed to load model: {str(e)}")
-        print(f"    Skipping evaluation for {model_name}")
+        print(f"\nError during collection: {str(e)}")
         return {
             'model_name': model_name,
             'model_description': model.get('description', ''),
@@ -140,101 +106,63 @@ def evaluate_model(
             'error': str(e)
         }
     
-    # Initialize evaluator
-    evaluator = MultiTierEvaluator()
-    print(f"    Using multi-tier evaluation")
-    
+    # Save responses if requested
+    responses_path = save_responses
+    if not responses_path:
+        # Default save location
+        responses_dir = Path("responses")
+        responses_dir.mkdir(exist_ok=True)
+        safe_model_name = model_name.replace('/', '_')
+        responses_path = responses_dir / f"{safe_model_name}.xlsx"
+
+    saved_path = collector.save_to_xlsx(responses_path)
+    print(f"Responses saved to: {saved_path}")
+
+    # STEP 2: EVALUATE RESPONSES
+    print("\nSTEP 2: Evaluating responses...")
+
+    from response_evaluator import ResponseEvaluator
+    evaluator = ResponseEvaluator(saved_path)
+    evaluation_results = evaluator.evaluate_all(verbose=True)
+
+    # Generate reports
+    output_dir = Path("reports")
+    reports = evaluator.generate_reports(output_dir)
+
+    # Get summary
+    summary = evaluator.get_summary()
+
+    # Convert to the expected format for backward compatibility
     test_results = []
-    stats_by_category = {}
-    stats_by_severity = {}
-    
-    for idx, test_case in enumerate(test_suite, 1):
-        print(f"  [{idx}/{len(test_suite)}] Running test: {test_case.id} - {test_case.name}", end="")
-        
-        try:
-            # Generate model output
-            output = model_inference.generate(
-                test_case.system_prompt,
-                test_case.get_user_prompt()
-            )
-            
-            # Evaluate the output
-            eval_result = evaluator.evaluate(test_case, output)
-            passed = eval_result.passed
+    for eval_result in evaluation_results:
+        test_results.append({
+            'test_id': eval_result['test_id'],
+            'test_name': eval_result['test_name'],
+            'category': eval_result['category'],
+            'severity': eval_result['severity'],
+            'passed': eval_result['passed'],
+            'output': eval_result.get('model_response', ''),
+            'notes': f"Expected behavior: {eval_result.get('expected_behavior', '')}",
+            'system_prompt': eval_result.get('system_prompt', ''),
+            'user_prompt': eval_result.get('user_prompt', ''),
+            'expected_behavior': eval_result.get('expected_behavior', '')
+        })
 
-        except Exception as e:
-            output = f"[ERROR] {str(e)}"
-            passed = False
-        
-        result = {
-            'test_id': test_case.id,
-            'test_name': test_case.name,
-            'category': test_case.category,
-            'severity': test_case.severity,
-            'passed': passed,
-            'output': output,
-            'notes': f'Expected behavior: {test_case.expected_behavior}',
-            'system_prompt': test_case.system_prompt,
-            'user_prompt': test_case.get_user_prompt(),
-            'expected_behavior': test_case.expected_behavior
-        }
-        test_results.append(result)
-        
-        # Update statistics by category
-        if test_case.category not in stats_by_category:
-            stats_by_category[test_case.category] = {'passed': 0, 'failed': 0, 'total': 0}
-        stats_by_category[test_case.category]['total'] += 1
-        if passed:
-            stats_by_category[test_case.category]['passed'] += 1
-        else:
-            stats_by_category[test_case.category]['failed'] += 1
-        
-        # Update statistics by severity
-        if test_case.severity not in stats_by_severity:
-            stats_by_severity[test_case.severity] = {'passed': 0, 'failed': 0, 'total': 0}
-        stats_by_severity[test_case.severity]['total'] += 1
-        if passed:
-            stats_by_severity[test_case.severity]['passed'] += 1
-        else:
-            stats_by_severity[test_case.severity]['failed'] += 1
-        
-        status = " ✓" if passed else " ✗"
-        print(status)
-    
-    # Unload model to free memory
-    model_inference.unload()
-    print(f"  ✓ Model unloaded")
+    print(f"\nSummary: {summary['passed_tests']}/{summary['total_tests']} passed ({summary['pass_rate']:.1f}% pass rate)")
+    print(f"\nReports generated:")
+    print(f"  PDF: {reports['pdf']}")
+    print(f"  Excel: {reports['excel']}")
 
-    # Pause endpoint if we started it (to save costs)
-    if endpoint_manager:
-        endpoint_manager.pause()
-
-    # Optionally save responses for later re-evaluation
-    if save_responses:
-        collector = ResponseCollector(model)
-        collector.metadata = _create_collection_metadata(model, test_suite)
-        collector.responses = _convert_results_to_responses(test_results, test_suite)
-        saved_path = collector.save_to_xlsx(save_responses)
-        print(f"  ✓ Responses saved to: {saved_path}")
-
-    # Calculate overall statistics
-    total_tests = len(test_results)
-    passed_tests = sum(1 for r in test_results if r['passed'])
-    failed_tests = total_tests - passed_tests
-    pass_rate = (passed_tests / total_tests * 100) if total_tests > 0 else 0
-    
-    print(f"\n  Summary: {passed_tests}/{total_tests} passed ({pass_rate:.1f}% pass rate)")
-    
     return {
         'model_name': model_name,
         'model_description': model.get('description', ''),
         'test_results': test_results,
-        'stats_by_category': stats_by_category,
-        'stats_by_severity': stats_by_severity,
-        'total_tests': total_tests,
-        'passed_tests': passed_tests,
-        'failed_tests': failed_tests,
-        'pass_rate': pass_rate
+        'stats_by_category': summary['stats_by_category'],
+        'stats_by_severity': summary['stats_by_severity'],
+        'total_tests': summary['total_tests'],
+        'passed_tests': summary['passed_tests'],
+        'failed_tests': summary['failed_tests'],
+        'pass_rate': summary['pass_rate']
     }
 
 

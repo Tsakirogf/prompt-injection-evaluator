@@ -111,7 +111,7 @@ class EndpointManager:
         state = status.get('status', {}).get('state', '').lower()
         return state == 'running'
 
-    def resume(self, wait: bool = True, max_wait: int = 120) -> bool:
+    def resume(self, wait: bool = True, max_wait: int = 360) -> bool:
         """
         Resume (start) the endpoint.
 

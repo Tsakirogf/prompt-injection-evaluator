@@ -143,7 +143,7 @@ class ResponseCollector:
 
             if endpoint_manager:
                 try:
-                    if not endpoint_manager.resume(wait=True, max_wait=120):
+                    if not endpoint_manager.resume(wait=True, max_wait=480):
                         if verbose:
                             print(f"  Failed to start endpoint, will attempt to continue...")
                 except Exception as e:
