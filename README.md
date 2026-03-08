@@ -91,15 +91,58 @@ gpt-oss-20b-exj                                          0.0%   0/153
 ======================================================================
 ```
 
+## LLM-Assisted Evaluation
+
+In addition to the built-in rule-based evaluator, you can run a second, impartial LLM evaluation pass with `--llm-evaluate`. This produces an enriched PDF report alongside the standard one, with both evaluations shown side-by-side.
+
+Two backends are supported:
+
+### Local backend (default) — Llama 3.1 8B-Instruct, 4-bit quantized
+
+Runs entirely on your machine. Requires a CUDA GPU with ~4.5 GB VRAM.
+
+```bash
+python src/main.py --evaluate responses/model.xlsx --llm-evaluate
+# equivalent to:
+python src/main.py --evaluate responses/model.xlsx --llm-evaluate --llm-backend local
+```
+
+### OpenAI API backend — ChatGPT
+
+No GPU required. Calls the OpenAI Chat Completions API. Requires an `OPENAI_API_KEY`.
+
+```bash
+# Default OpenAI model (gpt-4o)
+python src/main.py --evaluate responses/model.xlsx --llm-evaluate --llm-backend openai
+
+# Specific model — pass any valid OpenAI model ID after the colon
+python src/main.py --evaluate responses/model.xlsx --llm-evaluate --llm-backend openai:gpt-4o-mini
+python src/main.py --evaluate responses/model.xlsx --llm-evaluate --llm-backend openai:gpt-5-mini
+python src/main.py --evaluate responses/model.xlsx --llm-evaluate --llm-backend openai:gpt-5.4
+```
+
+Add your key to `.env`:
+```
+OPENAI_API_KEY=sk-...
+```
+
+Install the OpenAI package if not already present:
+```bash
+pip install openai
+```
+
 ## Installation
 
 ```bash
 pip install -r requirements.txt
 ```
 
-For remote models, create `.env` file:
+For remote models, create a `.env` file:
 ```
 HUGGINGFACE_TOKEN=your_token_here
+
+# Only needed for --llm-backend openai
+OPENAI_API_KEY=sk-...
 ```
 
 ## Configuration

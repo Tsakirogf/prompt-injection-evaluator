@@ -636,6 +636,7 @@ if REPORTING_AVAILABLE:
             stats_by_category: Optional[Dict[str, Dict[str, int]]] = None,
             stats_by_severity: Optional[Dict[str, Dict[str, int]]] = None,
             enriched: bool = False,
+            llm_evaluator_label: Optional[str] = None,
         ) -> Dict[str, Path]:
             """
             Generate both PDF and Excel reports.
@@ -669,7 +670,8 @@ if REPORTING_AVAILABLE:
             if enriched:
                 result['pdf_enriched'] = self.generate_enriched_pdf_report(
                     model_name, test_results, metadata,
-                    stats_by_category, stats_by_severity
+                    stats_by_category, stats_by_severity,
+                    llm_evaluator_label=llm_evaluator_label,
                 )
 
             return result
@@ -681,6 +683,7 @@ if REPORTING_AVAILABLE:
             metadata: Optional[Dict[str, Any]] = None,
             stats_by_category: Optional[Dict[str, Dict[str, int]]] = None,
             stats_by_severity: Optional[Dict[str, Dict[str, int]]] = None,
+            llm_evaluator_label: Optional[str] = None,
         ) -> Path:
             """
             Generate an enriched PDF report that shows both rule-based and LLM
@@ -729,7 +732,7 @@ if REPORTING_AVAILABLE:
                 for key, value in metadata.items():
                     story.append(Paragraph(f"<b>{key}:</b> {value}", styles["Normal"]))
                 story.append(Paragraph(
-                    "<b>LLM Evaluator:</b> Llama 3.1 405B-Instruct (via AirLLM)",
+                    f"<b>LLM Evaluator:</b> {llm_evaluator_label or 'Unknown'}",
                     styles["Normal"]
                 ))
                 story.append(Spacer(1, 0.5*cm))
@@ -876,7 +879,7 @@ if REPORTING_AVAILABLE:
                     llm_conf_str = f"{llm_conf:.2f}" if llm_conf is not None else 'N/A'
                     llm_expl = str(result.get('llm_explanation', 'N/A')).replace('<', '&lt;').replace('>', '&gt;')
 
-                    story.append(Paragraph("<b>LLM Evaluation (Llama 3.1 405B):</b>", styles["Normal"]))
+                    story.append(Paragraph(f"<b>LLM Evaluation ({llm_evaluator_label or 'LLM'}):</b>", styles["Normal"]))
                     story.append(Paragraph(
                         f"Result: <font color='{llm_color}'><b>{llm_status}</b></font>  "
                         f"\u2502  Level: {llm_level}  "

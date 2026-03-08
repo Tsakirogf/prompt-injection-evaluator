@@ -271,6 +271,7 @@ class ResponseEvaluator:
         }
 
         # Generate reports
+        llm_label = getattr(self.llm_evaluator, 'label', None) if self.llm_evaluator else None
         reports = report_generator.generate_reports(
             self.metadata.model_name,
             self.evaluation_results,
@@ -278,6 +279,7 @@ class ResponseEvaluator:
             stats_by_category=self.stats_by_category,
             stats_by_severity=self.stats_by_severity,
             enriched=enriched,
+            llm_evaluator_label=llm_label,
         )
 
         return reports

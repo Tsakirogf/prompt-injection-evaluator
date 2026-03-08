@@ -99,15 +99,20 @@ def run_model(model_name: str, test_suite_path: str = None) -> Path:
     return saved_path
 
 
-def evaluate_responses_file(xlsx_path: Path, llm_evaluate: bool = False) -> dict:
+def evaluate_responses_file(
+    xlsx_path: Path,
+    llm_evaluate: bool = False,
+    llm_backend: str = "local",
+) -> dict:
     """
     Step 2: Evaluate stored responses and generate PDF report.
 
     Args:
         xlsx_path: Path to responses xlsx file
-        llm_evaluate: When True, also run LLM evaluation (Llama 3.1 8B-Instruct,
-                      4-bit quantized) and generate an enriched PDF alongside the
-                      standard one.
+        llm_evaluate: When True, also run LLM evaluation and generate an enriched
+                      PDF alongside the standard one.
+        llm_backend: Which LLM evaluator to use — "local" (Llama 3.1 8B-Instruct,
+                     4-bit quantized) or "openai" / "openai:<model>" (OpenAI API).
 
     Returns:
         Dictionary with evaluation summary and report paths
@@ -122,13 +127,19 @@ def evaluate_responses_file(xlsx_path: Path, llm_evaluate: bool = False) -> dict
 
     print(f"\nInput: {xlsx_path.name}")
 
-    # Optional LLM evaluator — loaded lazily inside LLMEvaluator on first use
+    # Optional LLM evaluator — loaded/connected lazily on first use
     llm_evaluator = None
     if llm_evaluate:
-        from llm_evaluator import LLMEvaluator
-        print("\nLLM evaluation enabled (Llama 3.1 8B-Instruct, 4-bit quantized)")
-        print("  Model will be loaded on the first test (4-bit quantized, ~4.5 GB VRAM).")
-        llm_evaluator = LLMEvaluator()
+        from llm_evaluator import create_llm_evaluator
+        if llm_backend.startswith("openai"):
+            parts = llm_backend.split(":", 1)
+            model = parts[1] if len(parts) == 2 else "gpt-4o"
+            print(f"\nLLM evaluation enabled (OpenAI API, model: {model})")
+            print("  Requires OPENAI_API_KEY in environment / .env file.")
+        else:
+            print("\nLLM evaluation enabled (Llama 3.1 8B-Instruct, 4-bit quantized)")
+            print("  Model will be loaded on the first test (4-bit quantized, ~4.5 GB VRAM).")
+        llm_evaluator = create_llm_evaluator(llm_backend)
 
     # Create output directory
     output_dir = Path("reports")
@@ -202,10 +213,24 @@ Examples:
         '--llm-evaluate', '-l',
         action='store_true',
         help=(
-            'Run LLM evaluation using Llama 3.1 8B-Instruct (4-bit via bitsandbytes) alongside '
-            'the standard rule-based evaluation. Produces two PDFs: the unchanged '
-            'standard report and an enriched report with both evaluations side-by-side. '
-            'Requires --evaluate.'
+            'Run LLM evaluation alongside the standard rule-based evaluation. '
+            'Produces two PDFs: the unchanged standard report and an enriched '
+            'report with both evaluations side-by-side. Requires --evaluate. '
+            'Use --llm-backend to choose the evaluator (default: local Llama 3.1 8B).'
+        )
+    )
+
+    parser.add_argument(
+        '--llm-backend', '-b',
+        default='local',
+        metavar='BACKEND',
+        help=(
+            'LLM evaluator backend to use with --llm-evaluate. '
+            'Options: '
+            '"local" — Llama 3.1 8B-Instruct, 4-bit quantized (default, requires GPU); '
+            '"openai" — OpenAI gpt-4o (requires OPENAI_API_KEY); '
+            '"openai:<model>" — specific OpenAI model, e.g. "openai:gpt-4o-mini". '
+            'Example: --llm-backend openai:gpt-4o-mini'
         )
     )
 
@@ -246,7 +271,11 @@ Examples:
             # Use the specified file
             eval_path = Path(args.evaluate)
 
-        evaluate_responses_file(eval_path, llm_evaluate=args.llm_evaluate)
+        evaluate_responses_file(
+            eval_path,
+            llm_evaluate=args.llm_evaluate,
+            llm_backend=args.llm_backend,
+        )
 
 
 if __name__ == "__main__":
