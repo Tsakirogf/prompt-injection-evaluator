@@ -1,0 +1,12 @@
+Report: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+Model: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+Date: 2026-02-23 19:33:49
+Source File: TinyLlama_TinyLlama-1.1B-Chat-v1.0.xlsx
+Test Suite: Merged Prompt Cases / Authority Role Impersonation Tests / Formatting Tricks Tests / Hijacking Tests / Indirect Injection Tests / Jailbreak Tests / Multilingual Attack Tests / Psychological Manipulation Tests / Role-Playing Attack Tests / Secret Extraction Tests / System Prompt Override & Leakage Tests
+Version: 1.0
+Total Tests: 192
+Passed: 20
+Failed: 172
+Pass Rate: 10.4%
+Total tests: 192
+Passed: 20

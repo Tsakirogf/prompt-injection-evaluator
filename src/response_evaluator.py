@@ -30,13 +30,17 @@ class ResponseEvaluator:
     - COMPROMISED (0): Model follows malicious instructions or leaks secrets
     """
 
-    def __init__(self, xlsx_path: Path, test_suite_path: Optional[Path] = None):
+    def __init__(self, xlsx_path: Path, test_suite_path: Optional[Path] = None,
+                 llm_evaluator=None):
         """
         Initialize the ResponseEvaluator.
 
         Args:
             xlsx_path: Path to xlsx file with collected responses
             test_suite_path: Optional path to test suite config. If None, uses default.
+            llm_evaluator: Optional LLMEvaluator instance. When provided, each
+                response is also evaluated by the LLM (independently of the
+                rule-based evaluator) and llm_* fields are added to every result.
         """
         self.xlsx_path = Path(xlsx_path)
 
@@ -53,8 +57,9 @@ class ResponseEvaluator:
             tc.id: tc for tc in self.test_suite.test_cases
         }
 
-        # Initialize evaluator
+        # Initialize evaluators
         self.evaluator = MultiTierEvaluator()
+        self.llm_evaluator = llm_evaluator  # None = skip LLM evaluation
 
         # Results storage
         self.evaluation_results: List[Dict[str, Any]] = []
@@ -145,10 +150,26 @@ class ResponseEvaluator:
             # Get TestCase with fresh definitions from JSON config
             test_case = self._get_test_case_for_response(response)
 
-            # Evaluate with multi-tier evaluator
+            # Evaluate with multi-tier (rule-based) evaluator
             eval_result: EvaluationResult = self.evaluator.evaluate(
                 test_case, response.model_response
             )
+
+            # LLM evaluation — independent, runs only when llm_evaluator is set.
+            # The LLM never sees the rule-based result to avoid anchoring bias.
+            llm_result = None
+            if self.llm_evaluator is not None:
+                if verbose:
+                    print(" [LLM…]", end="", flush=True)
+                llm_result = self.llm_evaluator.evaluate(test_case, response.model_response)
+                # Warn once if the very first LLM evaluation returned INVALID
+                # (usually means model failed to load — surface the explanation).
+                if (llm_result is not None
+                        and llm_result.security_level.name == "INVALID"
+                        and idx == 1
+                        and verbose):
+                    print(f"\n  [LLM evaluator] WARNING — first evaluation returned INVALID: "
+                          f"{llm_result.explanation}", flush=True)
 
             result = {
                 'test_id': response.test_id,
@@ -164,6 +185,11 @@ class ResponseEvaluator:
                 'security_level': eval_result.security_level.name,
                 'explanation': eval_result.explanation,
                 'confidence': eval_result.confidence,
+                # LLM evaluation fields — None when --llm-evaluate is not used
+                'llm_passed': llm_result.passed if llm_result else None,
+                'llm_security_level': llm_result.security_level.name if llm_result else None,
+                'llm_confidence': llm_result.confidence if llm_result else None,
+                'llm_explanation': llm_result.explanation if llm_result else None,
             }
 
             self.evaluation_results.append(result)
@@ -204,7 +230,8 @@ class ResponseEvaluator:
 
     def generate_reports(
         self,
-        output_dir: Optional[Path] = None
+        output_dir: Optional[Path] = None,
+        enriched: bool = False
     ) -> Dict[str, Path]:
         """
         Generate PDF and Excel reports from evaluation results.
@@ -249,7 +276,8 @@ class ResponseEvaluator:
             self.evaluation_results,
             metadata,
             stats_by_category=self.stats_by_category,
-            stats_by_severity=self.stats_by_severity
+            stats_by_severity=self.stats_by_severity,
+            enriched=enriched,
         )
 
         return reports
@@ -291,6 +319,8 @@ def evaluate_responses(
     xlsx_path: Path,
     output_dir: Optional[Path] = None,
     verbose: bool = True,
+    llm_evaluator=None,
+    enriched: bool = False,
     **kwargs  # Accept but ignore extra args for backward compatibility
 ) -> Dict[str, Any]:
     """
@@ -300,13 +330,16 @@ def evaluate_responses(
         xlsx_path: Path to xlsx file with collected responses
         output_dir: Directory for output reports
         verbose: Whether to print progress
+        llm_evaluator: Optional LLMEvaluator instance for parallel LLM evaluation
+        enriched: When True (requires llm_evaluator), also generates an enriched
+                  PDF that shows both rule-based and LLM evaluations side-by-side
 
     Returns:
         Dictionary with summary and report paths
     """
-    evaluator = ResponseEvaluator(xlsx_path)
+    evaluator = ResponseEvaluator(xlsx_path, llm_evaluator=llm_evaluator)
     evaluator.evaluate_all(verbose=verbose)
-    reports = evaluator.generate_reports(output_dir)
+    reports = evaluator.generate_reports(output_dir, enriched=enriched)
     summary = evaluator.get_summary()
 
     return {

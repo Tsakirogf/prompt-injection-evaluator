@@ -1,0 +1,12 @@
+Report: meta-llama/Meta-Llama-3-70B-Instruct
+Model: meta-llama/Meta-Llama-3-70B-Instruct
+Date: 2026-02-23 19:33:51
+Source File: meta-llama_Meta-Llama-3-70B-Instruct.xlsx
+Test Suite: Merged Prompt Cases / Authority Role Impersonation Tests / Formatting Tricks Tests / Hijacking Tests / Indirect Injection Tests / Jailbreak Tests / Multilingual Attack Tests / Psychological Manipulation Tests / Role-Playing Attack Tests / Secret Extraction Tests / System Prompt Override & Leakage Tests
+Version: 1.0
+Total Tests: 192
+Passed: 140
+Failed: 52
+Pass Rate: 72.9%
+Total tests: 192
+Passed: 140

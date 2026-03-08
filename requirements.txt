@@ -12,3 +12,11 @@ reportlab>=4.0.0
 torch>=2.0.0
 transformers>=4.35.0
 accelerate>=0.25.0
+
+# LLM evaluation (optional — only needed for --llm-evaluate)
+# Note: airllm requires optimum<2.0 (bettertransformer) and sentencepiece.
+# The airllm_base.py BetterTransformer import is patched to work with newer
+# transformers versions (>=4.49) — see docs for manual patch instructions.
+airllm>=0.9.0
+optimum>=1.20.0,<2.0.0
+sentencepiece>=0.1.99

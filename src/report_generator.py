@@ -634,7 +634,8 @@ if REPORTING_AVAILABLE:
             test_results: List[Dict[str, Any]],
             metadata: Optional[Dict[str, Any]] = None,
             stats_by_category: Optional[Dict[str, Dict[str, int]]] = None,
-            stats_by_severity: Optional[Dict[str, Dict[str, int]]] = None
+            stats_by_severity: Optional[Dict[str, Dict[str, int]]] = None,
+            enriched: bool = False,
         ) -> Dict[str, Path]:
             """
             Generate both PDF and Excel reports.
@@ -645,9 +646,11 @@ if REPORTING_AVAILABLE:
                 metadata: Optional metadata to include in reports.
                 stats_by_category: Statistics broken down by attack category.
                 stats_by_severity: Statistics broken down by severity level.
+                enriched: When True, also generate an LLM-enriched PDF alongside
+                          the standard one (requires llm_* fields in test_results).
 
             Returns:
-                Dictionary with 'pdf' and 'excel' keys containing file paths.
+                Dictionary with 'pdf', 'excel', and optionally 'pdf_enriched' keys.
             """
             pdf_path = self.generate_pdf_report(
                 model_name, test_results, metadata, stats_by_category, stats_by_severity
@@ -657,11 +660,263 @@ if REPORTING_AVAILABLE:
             )
             images = self._generate_test_assets(model_name, test_results)
 
-            return {
+            result = {
                 'pdf': pdf_path,
                 'excel': excel_path,
-                'images': images
+                'images': images,
             }
+
+            if enriched:
+                result['pdf_enriched'] = self.generate_enriched_pdf_report(
+                    model_name, test_results, metadata,
+                    stats_by_category, stats_by_severity
+                )
+
+            return result
+
+        def generate_enriched_pdf_report(
+            self,
+            model_name: str,
+            test_results: List[Dict[str, Any]],
+            metadata: Optional[Dict[str, Any]] = None,
+            stats_by_category: Optional[Dict[str, Dict[str, int]]] = None,
+            stats_by_severity: Optional[Dict[str, Dict[str, int]]] = None,
+        ) -> Path:
+            """
+            Generate an enriched PDF report that shows both rule-based and LLM
+            evaluations side-by-side for every test case.
+
+            The standard PDF is never modified — this method always writes to a
+            separate file: {model_name}_llm_enriched.pdf
+
+            Args:
+                model_name: Name of the model under test.
+                test_results: List of result dicts; each must contain the llm_*
+                              fields populated by LLMEvaluator.
+                metadata: Optional metadata dict.
+                stats_by_category: Pass/fail counts by attack category.
+                stats_by_severity: Pass/fail counts by severity level.
+
+            Returns:
+                Path to the generated enriched PDF file.
+            """
+            safe_name = self.sanitize_filename(model_name)
+            filename = self.output_dir / f"{safe_name}_llm_enriched.pdf"
+
+            doc = SimpleDocTemplate(
+                str(filename),
+                pagesize=A4,
+                rightMargin=2*cm,
+                leftMargin=2*cm,
+                topMargin=2*cm,
+                bottomMargin=2*cm,
+            )
+
+            styles = getSampleStyleSheet()
+            story = []
+
+            # ── Title ─────────────────────────────────────────────────────────
+            story.append(Paragraph(
+                f"<b>Prompt Injection Evaluation Report (LLM-Enriched)</b><br/>{model_name}",
+                styles["Title"]
+            ))
+            story.append(Spacer(1, 1*cm))
+
+            # ── Metadata ──────────────────────────────────────────────────────
+            if metadata:
+                story.append(Paragraph("<b>Report Information</b>", styles["Heading2"]))
+                story.append(Spacer(1, 0.3*cm))
+                for key, value in metadata.items():
+                    story.append(Paragraph(f"<b>{key}:</b> {value}", styles["Normal"]))
+                story.append(Paragraph(
+                    "<b>LLM Evaluator:</b> Llama 3.1 405B-Instruct (via AirLLM)",
+                    styles["Normal"]
+                ))
+                story.append(Spacer(1, 0.5*cm))
+
+            # ── Agreement summary ─────────────────────────────────────────────
+            llm_results = [r for r in test_results if r.get('llm_passed') is not None]
+            if llm_results:
+                agreements = sum(
+                    1 for r in llm_results
+                    if r.get('passed') == r.get('llm_passed')
+                )
+                disagreements = len(llm_results) - agreements
+                agree_pct = agreements / len(llm_results) * 100
+
+                story.append(Paragraph("<b>Rule-Based vs LLM Agreement</b>", styles["Heading2"]))
+                story.append(Spacer(1, 0.3*cm))
+                story.append(Paragraph(
+                    f"<b>Tests with LLM evaluation:</b> {len(llm_results)} / {len(test_results)}",
+                    styles["Normal"]
+                ))
+                story.append(Paragraph(
+                    f"<b>Agreement:</b> {agreements}/{len(llm_results)} ({agree_pct:.1f}%)",
+                    styles["Normal"]
+                ))
+                story.append(Paragraph(
+                    f"<b>Disagreements:</b> {disagreements}",
+                    styles["Normal"]
+                ))
+                story.append(Spacer(1, 0.5*cm))
+
+            # ── Summary (mirrors standard report) ─────────────────────────────
+            if test_results:
+                story.append(Paragraph("<b>Test Results Summary</b>", styles["Heading2"]))
+                story.append(Spacer(1, 0.3*cm))
+
+                passed = sum(1 for r in test_results if r.get('passed', False))
+                failed = len(test_results) - passed
+                pass_rate = (passed / len(test_results) * 100) if test_results else 0
+
+                story.append(Paragraph(
+                    f"<b>Total Tests:</b> {len(test_results)}", styles["Normal"]
+                ))
+                story.append(Paragraph(
+                    f"<b>Passed:</b> {passed} | <b>Failed:</b> {failed} "
+                    f"| <b>Pass Rate:</b> {pass_rate:.1f}%",
+                    styles["Normal"]
+                ))
+                story.append(Spacer(1, 0.3*cm))
+
+                if stats_by_category:
+                    story.append(Paragraph("<b>Results by Attack Category:</b>", styles["Heading3"]))
+                    story.append(Spacer(1, 0.2*cm))
+                    for category, stats in sorted(stats_by_category.items()):
+                        cat_rate = (stats['passed'] / stats['total'] * 100) if stats['total'] else 0
+                        story.append(Paragraph(
+                            f"  \u2022 {category}: {stats['passed']}/{stats['total']} "
+                            f"passed ({cat_rate:.1f}%)",
+                            styles["Normal"]
+                        ))
+                    story.append(Spacer(1, 0.3*cm))
+
+                if stats_by_severity:
+                    story.append(Paragraph("<b>Results by Severity Level:</b>", styles["Heading3"]))
+                    story.append(Spacer(1, 0.2*cm))
+                    for severity in ['critical', 'high', 'medium', 'low']:
+                        if severity in stats_by_severity:
+                            stats = stats_by_severity[severity]
+                            sev_rate = (stats['passed'] / stats['total'] * 100) if stats['total'] else 0
+                            story.append(Paragraph(
+                                f"  \u2022 {severity}: {stats['passed']}/{stats['total']} "
+                                f"passed ({sev_rate:.1f}%)",
+                                styles["Normal"]
+                            ))
+                    story.append(Spacer(1, 0.5*cm))
+
+            # ── Full test transcript with dual evaluation ──────────────────────
+            story.append(Paragraph("<b>Full Test Transcript</b>", styles["Heading2"]))
+            story.append(Spacer(1, 0.3*cm))
+            story.append(Paragraph(
+                "Each test shows the rule-based evaluation followed by the independent "
+                "LLM evaluation. Disagreements between the two are highlighted.",
+                styles["Normal"]
+            ))
+            story.append(Spacer(1, 0.5*cm))
+
+            for idx, result in enumerate(test_results, 1):
+                story.append(Paragraph(
+                    f"<b>Test {idx}: {result.get('test_name', 'Unknown')}</b> "
+                    f"({result.get('test_id', 'N/A')})",
+                    styles["Heading3"]
+                ))
+                story.append(Spacer(1, 0.2*cm))
+
+                # System Prompt
+                story.append(Paragraph("<b>System Prompt:</b>", styles["Normal"]))
+                sp = str(result.get('system_prompt', 'N/A')).replace('<', '&lt;').replace('>', '&gt;')
+                story.append(Paragraph(sp, styles["Code"]))
+                story.append(Spacer(1, 0.3*cm))
+
+                # User Prompt
+                story.append(Paragraph("<b>User Prompt:</b>", styles["Normal"]))
+                up = str(result.get('user_prompt', 'N/A')).replace('<', '&lt;').replace('>', '&gt;')
+                story.append(Paragraph(up, styles["Code"]))
+                story.append(Spacer(1, 0.3*cm))
+
+                # Model Response
+                story.append(Paragraph("<b>Model Response:</b>", styles["Normal"]))
+                out = str(result.get('output', 'No output')).replace('<', '&lt;').replace('>', '&gt;')
+                story.append(Paragraph(out, styles["Code"]))
+                story.append(Spacer(1, 0.3*cm))
+
+                # Expected Behavior
+                story.append(Paragraph("<b>Expected Behavior:</b>", styles["Normal"]))
+                eb = str(result.get('expected_behavior', 'N/A')).replace('_', ' ').title()
+                story.append(Paragraph(eb, styles["Normal"]))
+                story.append(Spacer(1, 0.3*cm))
+
+                # ── Rule-based evaluation ──────────────────────────────────────
+                rb_passed = result.get('passed', False)
+                rb_status = "PASS" if rb_passed else "FAIL"
+                rb_color = 'green' if rb_passed else 'red'
+                rb_level = result.get('security_level', 'N/A')
+                rb_conf = result.get('confidence')
+                rb_conf_str = f"{rb_conf:.2f}" if rb_conf is not None else 'N/A'
+                rb_expl = str(result.get('explanation', 'N/A')).replace('<', '&lt;').replace('>', '&gt;')
+
+                story.append(Paragraph("<b>Rule-Based Evaluation:</b>", styles["Normal"]))
+                story.append(Paragraph(
+                    f"Result: <font color='{rb_color}'><b>{rb_status}</b></font>  "
+                    f"\u2502  Level: {rb_level}  "
+                    f"\u2502  Confidence: {rb_conf_str}",
+                    styles["Normal"]
+                ))
+                story.append(Paragraph(f"Explanation: {rb_expl}", styles["Normal"]))
+                story.append(Spacer(1, 0.2*cm))
+
+                # ── LLM evaluation ─────────────────────────────────────────────
+                llm_passed = result.get('llm_passed')
+                if llm_passed is not None:
+                    llm_status = "PASS" if llm_passed else "FAIL"
+                    llm_color = 'green' if llm_passed else 'red'
+                    llm_level = result.get('llm_security_level', 'N/A')
+                    llm_conf = result.get('llm_confidence')
+                    llm_conf_str = f"{llm_conf:.2f}" if llm_conf is not None else 'N/A'
+                    llm_expl = str(result.get('llm_explanation', 'N/A')).replace('<', '&lt;').replace('>', '&gt;')
+
+                    story.append(Paragraph("<b>LLM Evaluation (Llama 3.1 405B):</b>", styles["Normal"]))
+                    story.append(Paragraph(
+                        f"Result: <font color='{llm_color}'><b>{llm_status}</b></font>  "
+                        f"\u2502  Level: {llm_level}  "
+                        f"\u2502  Confidence: {llm_conf_str}",
+                        styles["Normal"]
+                    ))
+                    story.append(Paragraph(f"Explanation: {llm_expl}", styles["Normal"]))
+                    story.append(Spacer(1, 0.2*cm))
+
+                    # Disagreement banner
+                    if rb_passed != llm_passed:
+                        disagreement_style = ParagraphStyle(
+                            'Disagreement',
+                            parent=styles['Normal'],
+                            backColor=colors.Color(1.0, 0.92, 0.8),  # light orange
+                            borderColor=colors.orange,
+                            borderWidth=1,
+                            borderPadding=4,
+                            textColor=colors.Color(0.6, 0.3, 0.0),
+                        )
+                        rb_label = "PASS" if rb_passed else "FAIL"
+                        llm_label = "PASS" if llm_passed else "FAIL"
+                        story.append(Paragraph(
+                            f"\u26a0 DISAGREEMENT \u2014 "
+                            f"Rule-based: {rb_label}  vs  LLM: {llm_label}",
+                            disagreement_style
+                        ))
+                        story.append(Spacer(1, 0.2*cm))
+                else:
+                    story.append(Paragraph(
+                        "<i>LLM evaluation not available for this test.</i>",
+                        styles["Normal"]
+                    ))
+                    story.append(Spacer(1, 0.2*cm))
+
+                if idx < len(test_results):
+                    story.append(Spacer(1, 0.8*cm))
+
+            doc.build(story)
+            return filename
 
         def generate_comparison_report(
             self,
