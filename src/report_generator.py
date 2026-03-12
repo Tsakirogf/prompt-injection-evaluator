@@ -3,6 +3,7 @@ Report Generator Service
 
 Generates PDF and Excel reports for prompt injection evaluation results.
 """
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -19,6 +20,8 @@ try:
         SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
     )
     from reportlab.lib import colors
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
     REPORTING_AVAILABLE = True
 except ImportError:
     # Define placeholders so names exist at module level and linters don't warn.
@@ -48,6 +51,135 @@ except Exception:
     ImageDraw = None
     ImageFont = None
     IMAGE_AVAILABLE = False
+
+
+_UNICODE_FONT_NAME: Optional[str] = None
+
+
+def _get_unicode_font() -> Optional[str]:
+    """
+    Register a Unicode-capable TrueType font with ReportLab (once) and return
+    its registered name.  Returns None if no suitable font is found so callers
+    can fall back to the default Latin fonts gracefully.
+
+    Font priority (broadest Unicode coverage first):
+      1. Tahoma       – covers Latin, Cyrillic, Arabic, Hebrew, Greek, Thai
+      2. DejaVu Sans  – covers Latin, Cyrillic, Greek (Linux/macOS)
+      3. Arial        – basic Unicode (Latin + some Cyrillic)
+    """
+    global _UNICODE_FONT_NAME
+    if _UNICODE_FONT_NAME is not None:
+        return _UNICODE_FONT_NAME
+
+    if not REPORTING_AVAILABLE:
+        return None
+
+    candidates = [
+        # Windows native paths
+        ("C:/Windows/Fonts/tahoma.ttf",  "Tahoma"),
+        ("C:/Windows/Fonts/arial.ttf",   "Arial"),
+        # WSL mount
+        ("/mnt/c/Windows/Fonts/tahoma.ttf", "Tahoma"),
+        ("/mnt/c/Windows/Fonts/arial.ttf",  "Arial"),
+        # Linux
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "DejaVuSans"),
+        ("/usr/share/fonts/dejavu/DejaVuSans.ttf",          "DejaVuSans"),
+        # macOS
+        ("/Library/Fonts/Tahoma.ttf",           "Tahoma"),
+        ("/System/Library/Fonts/Geneva.ttf",    "Geneva"),
+    ]
+
+    for path, name in candidates:
+        try:
+            pdfmetrics.registerFont(TTFont(name, path))
+            _UNICODE_FONT_NAME = name
+            return name
+        except Exception:
+            continue
+
+    return None
+
+
+def _apply_unicode_font(styles) -> None:
+    """
+    Override the fontName of content-bearing styles (Code, Normal) so that
+    non-Latin characters (Cyrillic, Arabic, etc.) render correctly in PDFs.
+    No-op when no Unicode font is available.
+    """
+    font = _get_unicode_font()
+    if not font:
+        return
+    for style_name in ("Code", "Normal"):
+        if style_name in styles:
+            styles[style_name].fontName = font
+
+
+_CJK_FONT_NAME: Optional[str] = None
+
+# Regex matching CJK character runs (Hiragana, Katakana, CJK Unified Ideographs,
+# CJK Extension A, CJK Compatibility Ideographs).
+# Note: supplementary-plane ranges (>U+FFFF) require \U00020000 notation in Python
+# regex and are omitted here for safety; the listed ranges cover all common
+# Japanese and Chinese characters.
+_CJK_RE = re.compile(
+    r'[\u3040-\u309f'   # Hiragana
+    r'\u30a0-\u30ff'    # Katakana
+    r'\u3400-\u4dbf'    # CJK Extension A
+    r'\u4e00-\u9fff'    # CJK Unified Ideographs
+    r'\uf900-\ufaff]+'  # CJK Compatibility Ideographs
+)
+
+
+def _get_cjk_font() -> Optional[str]:
+    """
+    Register a CJK-capable TrueType font with ReportLab (once) and return
+    its registered name.  Returns None if no suitable font is found.
+    """
+    global _CJK_FONT_NAME
+    if _CJK_FONT_NAME is not None:
+        return _CJK_FONT_NAME
+
+    if not REPORTING_AVAILABLE:
+        return None
+
+    candidates = [
+        # Windows — TTC files need subfontIndex=0
+        ("C:/Windows/Fonts/YuGothR.ttc",  "YuGothic", 0),
+        ("C:/Windows/Fonts/msgothic.ttc", "MSGothic",  0),
+        ("C:/Windows/Fonts/msyh.ttc",     "MSYaHei",   0),
+        # WSL mount
+        ("/mnt/c/Windows/Fonts/YuGothR.ttc",  "YuGothic", 0),
+        ("/mnt/c/Windows/Fonts/msgothic.ttc", "MSGothic",  0),
+        ("/mnt/c/Windows/Fonts/msyh.ttc",     "MSYaHei",   0),
+        # Linux (Noto CJK)
+        ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "NotoSansCJK", 0),
+        ("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",      "NotoSansCJK", 0),
+    ]
+
+    for path, name, idx in candidates:
+        try:
+            pdfmetrics.registerFont(TTFont(name, path, subfontIndex=idx))
+            _CJK_FONT_NAME = name
+            return name
+        except Exception:
+            continue
+
+    return None
+
+
+def _apply_cjk_tags(text: str) -> str:
+    """
+    Wrap CJK character runs in ReportLab <font> tags so they render with the
+    CJK font while the rest of the text uses the primary Unicode font.
+    Returns text unchanged when no CJK font is available or no CJK found.
+    """
+    cjk_font = _get_cjk_font()
+    if not cjk_font or not _CJK_RE.search(text):
+        return text
+    return _CJK_RE.sub(
+        lambda m: f'<font name="{cjk_font}">{m.group()}</font>',
+        text
+    )
 
 
 if not REPORTING_AVAILABLE:
@@ -279,6 +411,7 @@ if REPORTING_AVAILABLE:
             )
 
             styles = getSampleStyleSheet()
+            _apply_unicode_font(styles)
             story = []
 
             # Title
@@ -368,19 +501,19 @@ if REPORTING_AVAILABLE:
 
                 # System Prompt
                 story.append(Paragraph("<b>System Prompt:</b>", styles["Normal"]))
-                system_prompt = str(result.get('system_prompt', 'N/A')).replace('<', '&lt;').replace('>', '&gt;')
+                system_prompt = _apply_cjk_tags(str(result.get('system_prompt', 'N/A')).replace('<', '&lt;').replace('>', '&gt;'))
                 story.append(Paragraph(system_prompt, styles["Code"]))
                 story.append(Spacer(1, 0.3*cm))
 
                 # User Prompt
                 story.append(Paragraph("<b>User Prompt:</b>", styles["Normal"]))
-                user_prompt = str(result.get('user_prompt', 'N/A')).replace('<', '&lt;').replace('>', '&gt;')
+                user_prompt = _apply_cjk_tags(str(result.get('user_prompt', 'N/A')).replace('<', '&lt;').replace('>', '&gt;'))
                 story.append(Paragraph(user_prompt, styles["Code"]))
                 story.append(Spacer(1, 0.3*cm))
 
                 # Model Response
                 story.append(Paragraph("<b>Model Response:</b>", styles["Normal"]))
-                output_text = str(result.get('output', 'No output')).replace('<', '&lt;').replace('>', '&gt;')
+                output_text = _apply_cjk_tags(str(result.get('output', 'No output')).replace('<', '&lt;').replace('>', '&gt;'))
                 story.append(Paragraph(output_text, styles["Code"]))
                 story.append(Spacer(1, 0.3*cm))
 
@@ -716,6 +849,7 @@ if REPORTING_AVAILABLE:
             )
 
             styles = getSampleStyleSheet()
+            _apply_unicode_font(styles)
             story = []
 
             # ── Title ─────────────────────────────────────────────────────────
@@ -828,19 +962,19 @@ if REPORTING_AVAILABLE:
 
                 # System Prompt
                 story.append(Paragraph("<b>System Prompt:</b>", styles["Normal"]))
-                sp = str(result.get('system_prompt', 'N/A')).replace('<', '&lt;').replace('>', '&gt;')
+                sp = _apply_cjk_tags(str(result.get('system_prompt', 'N/A')).replace('<', '&lt;').replace('>', '&gt;'))
                 story.append(Paragraph(sp, styles["Code"]))
                 story.append(Spacer(1, 0.3*cm))
 
                 # User Prompt
                 story.append(Paragraph("<b>User Prompt:</b>", styles["Normal"]))
-                up = str(result.get('user_prompt', 'N/A')).replace('<', '&lt;').replace('>', '&gt;')
+                up = _apply_cjk_tags(str(result.get('user_prompt', 'N/A')).replace('<', '&lt;').replace('>', '&gt;'))
                 story.append(Paragraph(up, styles["Code"]))
                 story.append(Spacer(1, 0.3*cm))
 
                 # Model Response
                 story.append(Paragraph("<b>Model Response:</b>", styles["Normal"]))
-                out = str(result.get('output', 'No output')).replace('<', '&lt;').replace('>', '&gt;')
+                out = _apply_cjk_tags(str(result.get('output', 'No output')).replace('<', '&lt;').replace('>', '&gt;'))
                 story.append(Paragraph(out, styles["Code"]))
                 story.append(Spacer(1, 0.3*cm))
 
@@ -965,6 +1099,7 @@ if REPORTING_AVAILABLE:
             )
 
             styles = getSampleStyleSheet()
+            _apply_unicode_font(styles)
             story = []
 
             # Title

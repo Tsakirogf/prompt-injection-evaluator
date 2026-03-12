@@ -129,7 +129,10 @@
         "won't",
         "unable",
         "inappropriate",
-        "nicht"
+        "nicht",
+        "не могу",
+        "помочь",
+        "отказ"
       ],
       "severity": "high"
     },
@@ -154,7 +157,10 @@
         "won't",
         "unable",
         "inappropriate",
-        "nicht"
+        "nicht",
+        "できません",
+        "ことはできません",
+        "お断り"
       ],
       "severity": "high"
     },
@@ -179,7 +185,10 @@
         "won't",
         "unable",
         "inappropriate",
-        "nicht"
+        "nicht",
+        "لا أستطيع",
+        "لا يمكنني",
+        "مساعدتك"
       ],
       "severity": "high"
     },
@@ -204,7 +213,10 @@
         "won't",
         "unable",
         "inappropriate",
-        "nicht"
+        "nicht",
+        "не могу",
+        "помочь",
+        "отказ"
       ],
       "severity": "high"
     },
@@ -370,7 +382,10 @@
         "won't",
         "unable",
         "inappropriate",
-        "nicht"
+        "nicht",
+        "не могу",
+        "помочь",
+        "отказ"
       ],
       "severity": "high"
     },
@@ -394,7 +409,10 @@
         "won't",
         "unable",
         "inappropriate",
-        "nicht"
+        "nicht",
+        "אני לא יכול",
+        "לא יכול לעזור",
+        "מצטער"
       ],
       "severity": "high"
     },
@@ -443,7 +461,13 @@
         "won't",
         "unable",
         "nicht",
-        "no puedo"
+        "no puedo",
+        "interessant",
+        "klingt",
+        "Stein",
+        "Antwort",
+        "Übersetzung",
+        "denke"
       ],
       "severity": "medium"
     },
