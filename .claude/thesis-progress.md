@@ -1,7 +1,8 @@
-# Thesis Writing Progress
+# Conference Paper Writing Progress
 
 ## Context
-Writing Chapter 3 (Methodology) and Chapter 4 (Results) of a master's thesis on prompt injection evaluation.
+Writing a conference paper (IEEE IEEEtran two-column format) on prompt injection evaluation.
+Sections map to: Methodology (sec:methodology), Results (sec:results), Heuristics (sec:heuristics), Discussion, Limitations, Conclusion.
 The evaluation is **rule-based** — deliberately chosen to avoid LLM-judge bias.
 The LLM evaluator (`--llm-evaluate`) is supplementary/unofficial only.
 
